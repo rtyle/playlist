@@ -1,0 +1,118 @@
+#!/usr/bin/python
+
+import argparse
+import os
+import sys
+from contextlib import AbstractContextManager
+
+
+class Directory(AbstractContextManager):
+    def __init__(self, name: str, parent: "Directory" = None):
+        self.name = name
+        self.parent = parent
+
+    def __enter__(self):
+        self.fd = os.open(
+            self.name, os.O_RDONLY, dir_fd=self.parent.dir_fd() if self.parent else None
+        )
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        os.close(self.fd)
+
+    def dir_fd(self):
+        return self.fd
+
+    def path(self) -> list[str]:
+        return (self.parent.path() if self.parent else []) + [self.name]
+
+
+class Seed:
+    __filename = "playlist.m3u8"
+
+    def __init__(self, dry_run: bool, verbose: bool):
+        self.dry_run = dry_run
+        self.verbose = verbose
+
+    def grow(self, parent: Directory) -> list[str]:
+        with parent:
+            path = "/".join(parent.path())
+            dir_fd = parent.dir_fd()
+            locations = []
+
+            for entry in sorted(os.scandir(dir_fd), key=lambda e: e.name):
+                if entry.is_file() and entry.name.lower().endswith(
+                    (".mp3", ".flac", ".aac", ".wav", ".wma")
+                ):
+                    locations.append(entry.name)
+                elif entry.is_dir():
+                    locations.extend(
+                        f"{entry.name}/{item}"
+                        for item in self.grow(Directory(entry.name, parent))
+                    )
+
+            name = self.__filename
+            if not locations:
+                try:
+                    if not self.dry_run:
+                        os.remove(name, dir_fd=dir_fd)
+                    if self.verbose:
+                        print(f"\t{path}")
+                except FileNotFoundError:
+                    pass
+                return []
+
+            playlist = (
+                "\n".join((f"#EXTM3U", f"#PLAYLIST {path}", "\n".join(locations)))
+                + "\n"
+            )
+
+            try:
+                with os.fdopen(os.open(name, os.O_RDONLY, dir_fd=dir_fd), "r") as file:
+                    if file.read() == playlist:
+                        return [self.__filename]
+            except OSError:  # FileNotFoundError
+                pass
+
+            if not self.dry_run:
+                with os.fdopen(
+                    os.open(
+                        self.__filename,
+                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                        dir_fd=dir_fd,
+                    ),
+                    "w",
+                ) as file:
+                    file.write(playlist)
+            if self.verbose:
+                print(path)
+
+            return [self.__filename]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Grow trees of playlists from/in music libraries, specified by their roots."
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Simulate playlist creation without changing music libraries.",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable verbose output."
+    )
+    parser.add_argument(
+        "root",
+        nargs="*",
+        default=["."],
+        help="List of roots to music libraries (default is .).",
+    )
+    args = parser.parse_args()
+    seed = Seed(args.dry_run, args.dry_run or args.verbose)
+    for root in args.root:
+        seed.grow(Directory(root))
+
+
+if __name__ == "__main__":
+    main()
