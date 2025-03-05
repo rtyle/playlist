@@ -28,7 +28,6 @@ class Directory(AbstractContextManager):
 
 
 class Seed:
-
     def __init__(self, dry_run: bool, verbose: bool):
         self.dry_run = dry_run
         self.verbose = verbose
@@ -57,7 +56,7 @@ class Seed:
                     if not self.dry_run:
                         os.remove(name, dir_fd=dir_fd)
                     if self.verbose:
-                        print(*path)
+                        print("\t", *path)
                 except FileNotFoundError:
                     pass
                 return leaves
