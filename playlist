@@ -28,7 +28,6 @@ class Directory(AbstractContextManager):
 
 
 class Seed:
-    __filename = "playlist.m3u8"
 
     def __init__(self, dry_run: bool, verbose: bool):
         self.dry_run = dry_run
@@ -36,48 +35,46 @@ class Seed:
 
     def grow(self, parent: Directory) -> list[str]:
         with parent:
-            path = "/".join(parent.path())
             dir_fd = parent.dir_fd()
-            locations = []
 
+            leaves = []
+            branches = []
             for entry in sorted(os.scandir(dir_fd), key=lambda e: e.name):
                 if entry.is_file() and entry.name.lower().endswith(
                     (".mp3", ".flac", ".aac", ".wav", ".wma")
                 ):
-                    locations.append(entry.name)
+                    leaves.append(entry.name)
                 elif entry.is_dir():
-                    locations.extend(
+                    branches.extend(
                         f"{entry.name}/{item}"
                         for item in self.grow(Directory(entry.name, parent))
                     )
 
-            name = self.__filename
-            if not locations:
+            path = parent.path()
+            name = ".".join([*path, "m3u8"])
+            if not branches:
                 try:
                     if not self.dry_run:
                         os.remove(name, dir_fd=dir_fd)
                     if self.verbose:
-                        print(f"\t{path}")
+                        print(*path)
                 except FileNotFoundError:
                     pass
-                return []
+                return leaves
 
-            playlist = (
-                "\n".join((f"#EXTM3U", f"#PLAYLIST {path}", "\n".join(locations)))
-                + "\n"
-            )
+            playlist = "\n".join((f"#EXTM3U", "\n".join(branches))) + "\n"
 
             try:
                 with os.fdopen(os.open(name, os.O_RDONLY, dir_fd=dir_fd), "r") as file:
                     if file.read() == playlist:
-                        return [self.__filename]
+                        return branches + leaves
             except OSError:  # FileNotFoundError
                 pass
 
             if not self.dry_run:
                 with os.fdopen(
                     os.open(
-                        self.__filename,
+                        name,
                         os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
                         dir_fd=dir_fd,
                     ),
@@ -85,9 +82,9 @@ class Seed:
                 ) as file:
                     file.write(playlist)
             if self.verbose:
-                print(path)
+                print(*path)
 
-            return [self.__filename]
+            return branches + leaves
 
 
 def main() -> None:
