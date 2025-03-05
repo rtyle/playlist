@@ -89,7 +89,7 @@ class Seed:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Grow trees of playlists from/in music libraries, specified by their roots."
+        description="Embed m3u8 playlists into music libraries, specified by their roots."
     )
     parser.add_argument(
         "--dry-run",
