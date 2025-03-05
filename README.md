@@ -6,7 +6,7 @@ Each music library’s root directory is traversed looking for music files.
 All music files in a directory (and below)
 are aggregated/embedded into a playlist in the directory’s parent.
 The playlist is named for the path from the root to this parent directory,
-with slases replaced with dots and an .m3u8 file extension.
+with slashes replaced with dots and an .m3u8 file extension.
 
 If music libraries are arranged hierarchically by \<root\>/\<artist\>/\<album\>,
 then for each artist a \<root\>/\<artist\>/\<root\>.\<artist\>.m3u8 playlist is created
@@ -23,4 +23,4 @@ Git this repository as appropriate. For examples,
 
 ## Usage
 
-(cd parent; playlist root...)
+playlist root...
