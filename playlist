@@ -114,7 +114,7 @@ def main() -> None:
         help="List of roots to music libraries (default is .).",
     )
     args = parser.parse_args()
-    seed = Seed(args.dry_run, args.dry_run or args.verbose, args.dry_run or args.orphan)
+    seed = Seed(args.dry_run, args.dry_run or args.verbose, args.orphan)
     for root in args.root:
         seed.grow(Directory(root))
 
