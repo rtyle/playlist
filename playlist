@@ -28,60 +28,72 @@ class Directory(AbstractContextManager):
 
 
 class Seed:
-    def __init__(self, dry_run: bool, verbose: bool):
+    def __init__(self, dry_run: bool, verbose: bool, orphan: bool):
         self.dry_run = dry_run
         self.verbose = verbose
+        self.orphan = orphan
 
     def grow(self, parent: Directory) -> list[str]:
         with parent:
             dir_fd = parent.dir_fd()
 
-            leaves = []
             branches = []
+            leaves = []
+            orphans = set()
             for entry in sorted(os.scandir(dir_fd), key=lambda e: e.name):
-                if entry.is_file() and entry.name.lower().endswith(
-                    (".mp3", ".flac", ".aac", ".wav", ".wma")
-                ):
-                    leaves.append(entry.name)
-                elif entry.is_dir():
+                name = entry.name
+                if entry.is_dir():
                     branches.extend(
-                        f"{entry.name}/{item}"
-                        for item in self.grow(Directory(entry.name, parent))
+                        f"{name}/{item}" for item in self.grow(Directory(name, parent))
                     )
+                elif entry.is_file():
+                    lower = name.lower()
+                    if lower.endswith((".mp3", ".flac", ".aac", ".wav", ".wma")):
+                        leaves.append(name)
+                    elif lower.endswith(".m3u8"):
+                        orphans.add(name)
 
             path = parent.path()
-            name = ".".join([*path, "m3u8"])
-            if not branches:
+            if branches:
+                name = ".".join([*path, "m3u8"])
+                if name in orphans:
+                    orphans.remove(name)
+
+                playlist = "\n".join((f"#EXTM3U", "\n".join(branches))) + "\n"
+
+                same = False
                 try:
-                    if not self.dry_run:
-                        os.remove(name, dir_fd=dir_fd)
-                    if self.verbose:
-                        print("\t", *path)
-                except FileNotFoundError:
+                    with os.fdopen(
+                        os.open(name, os.O_RDONLY, dir_fd=dir_fd), "r"
+                    ) as file:
+                        if file.read() == playlist:
+                            same = True
+                except OSError:  # FileNotFoundError
                     pass
-                return leaves
 
-            playlist = "\n".join((f"#EXTM3U", "\n".join(branches))) + "\n"
+                if not same:
+                    if not self.dry_run:
+                        with os.fdopen(
+                            os.open(
+                                name,
+                                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                                dir_fd=dir_fd,
+                            ),
+                            "w",
+                        ) as file:
+                            file.write(playlist)
+                    if self.verbose:
+                        print(*path)
 
-            try:
-                with os.fdopen(os.open(name, os.O_RDONLY, dir_fd=dir_fd), "r") as file:
-                    if file.read() == playlist:
-                        return branches + leaves
-            except OSError:  # FileNotFoundError
-                pass
-
-            if not self.dry_run:
-                with os.fdopen(
-                    os.open(
-                        name,
-                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                        dir_fd=dir_fd,
-                    ),
-                    "w",
-                ) as file:
-                    file.write(playlist)
-            if self.verbose:
-                print(*path)
+            if not self.orphan:
+                for orphan in orphans:
+                    try:
+                        if not self.dry_run:
+                            os.remove(orphan, dir_fd=dir_fd)
+                        if self.verbose:
+                            print("\t", *path, orphan)
+                    except FileNotFoundError:
+                        pass
 
             return branches + leaves
 
@@ -95,6 +107,7 @@ def main() -> None:
         action="store_true",
         help="Simulate playlist creation without changing music libraries.",
     )
+    parser.add_argument("-o", "--orphan", action="store_true", help="Keep orphans.")
     parser.add_argument(
         "-v", "--verbose", action="store_true", help="Enable verbose output."
     )
@@ -105,7 +118,7 @@ def main() -> None:
         help="List of roots to music libraries (default is .).",
     )
     args = parser.parse_args()
-    seed = Seed(args.dry_run, args.dry_run or args.verbose)
+    seed = Seed(args.dry_run, args.dry_run or args.verbose, args.dry_run or args.orphan)
     for root in args.root:
         seed.grow(Directory(root))
 
