@@ -28,10 +28,10 @@ class Directory(AbstractContextManager):
 
 
 class Seed:
-    def __init__(self, dry_run: bool, verbose: bool, orphan: bool):
-        self.dry_run = dry_run
+    def __init__(self, change: bool, prune: bool, verbose: bool):
+        self.change = change
+        self.prune = prune
         self.verbose = verbose
-        self.orphan = orphan
 
     def grow(self, parent: Directory) -> list[str]:
         with parent:
@@ -71,7 +71,7 @@ class Seed:
                     pass
 
                 if not same:
-                    if not self.dry_run:
+                    if self.change:
                         with os.fdopen(
                             os.open(
                                 name,
@@ -84,12 +84,12 @@ class Seed:
                     if self.verbose:
                         print(*path)
 
-            if not self.orphan:
+            if self.prune:
                 for orphan in orphans:
-                        if not self.dry_run:
-                            os.remove(orphan, dir_fd=dir_fd)
-                        if self.verbose:
-                            print("\t", *path, orphan)
+                    if self.change:
+                        os.remove(orphan, dir_fd=dir_fd)
+                    if self.verbose:
+                        print("\t", *path, orphan)
 
             return branches + leaves
 
@@ -98,23 +98,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Embed m3u8 playlists into music libraries, specified by their roots."
     )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Simulate playlist creation without changing music libraries.",
-    )
-    parser.add_argument("-o", "--orphan", action="store_true", help="Keep orphans.")
-    parser.add_argument(
-        "-v", "--verbose", action="store_true", help="Enable verbose output."
-    )
-    parser.add_argument(
-        "root",
-        nargs="*",
-        default=["."],
-        help="List of roots to music libraries (default is .).",
-    )
+    parser.add_argument("--dry-run", action="store_true", help="change nothing")
+    parser.add_argument("-k", "--keep", action="store_true", help="keep orphans")
+    parser.add_argument("-v", "--verbose", action="store_true", help="verbose output")
+    parser.add_argument("root", nargs="*", default=["."], help="root directory")
     args = parser.parse_args()
-    seed = Seed(args.dry_run, args.dry_run or args.verbose, args.orphan)
+    seed = Seed(not args.dry_run, not args.keep, args.dry_run or args.verbose)
     for root in args.root:
         seed.grow(Directory(root))
 
