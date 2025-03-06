@@ -66,8 +66,7 @@ class Seed:
                     with os.fdopen(
                         os.open(name, os.O_RDONLY, dir_fd=dir_fd), "r"
                     ) as file:
-                        if file.read() == playlist:
-                            same = True
+                        same = file.read() == playlist
                 except OSError:  # FileNotFoundError
                     pass
 
@@ -87,13 +86,10 @@ class Seed:
 
             if not self.orphan:
                 for orphan in orphans:
-                    try:
                         if not self.dry_run:
                             os.remove(orphan, dir_fd=dir_fd)
                         if self.verbose:
                             print("\t", *path, orphan)
-                    except FileNotFoundError:
-                        pass
 
             return branches + leaves
 
