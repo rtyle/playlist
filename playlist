@@ -2,28 +2,19 @@
 
 import argparse
 import os
+import sys
 from contextlib import AbstractContextManager
 
 
-class Directory(AbstractContextManager):
-    def __init__(self, name: str, parent: "Directory" = None):
-        self.name = name
-        self.parent = parent
+class FileDescriptorManager(AbstractContextManager):
+    def __init__(self, fd: int):
+        self.fd = fd
 
-    def __enter__(self):
-        self.fd = os.open(
-            self.name, os.O_RDONLY, dir_fd=self.parent.dir_fd() if self.parent else None
-        )
-        return self
+    def __enter__(self) -> int:
+        return self.fd
 
     def __exit__(self, exc_type, exc_value, traceback):
         os.close(self.fd)
-
-    def dir_fd(self):
-        return self.fd
-
-    def path(self) -> list[str]:
-        return (self.parent.path() if self.parent else []) + [self.name]
 
 
 class Seed:
@@ -31,20 +22,19 @@ class Seed:
         self.change = change
         self.prune = prune
         self.verbose = verbose
+        self.path = []
 
-    def grow(self, parent: Directory) -> list[str]:
-        with parent:
-            dir_fd = parent.dir_fd()
+    def grow(self, name: str, parent: int = None) -> list[str]:
+        with FileDescriptorManager(os.open(name, os.O_RDONLY, dir_fd=parent)) as child:
+            self.path.append(name)
 
             branches = []
             leaves = []
             orphans = set()
-            for entry in sorted(os.scandir(dir_fd), key=lambda e: e.name):
+            for entry in sorted(os.scandir(child), key=lambda e: e.name):
                 name = entry.name
                 if entry.is_dir():
-                    branches.extend(
-                        f"{name}/{item}" for item in self.grow(Directory(name, parent))
-                    )
+                    branches.extend(f"{name}/{item}" for item in self.grow(name, child))
                 elif entry.is_file():
                     lower = name.lower()
                     if lower.endswith((".mp3", ".flac", ".aac", ".wav", ".wma")):
@@ -52,9 +42,8 @@ class Seed:
                     elif lower.endswith(".m3u8"):
                         orphans.add(name)
 
-            path = parent.path()
             if branches:
-                name = ".".join([*path, "m3u8"])
+                name = ".".join([*self.path, "m3u8"])
                 if name in orphans:
                     orphans.remove(name)
 
@@ -63,7 +52,7 @@ class Seed:
                 same = False
                 try:
                     with os.fdopen(
-                        os.open(name, os.O_RDONLY, dir_fd=dir_fd), "r"
+                        os.open(name, os.O_RDONLY, dir_fd=child), "r"
                     ) as file:
                         same = file.read() == playlist
                 except OSError:  # FileNotFoundError
@@ -75,21 +64,22 @@ class Seed:
                             os.open(
                                 name,
                                 os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                                dir_fd=dir_fd,
+                                dir_fd=child,
                             ),
                             "w",
                         ) as file:
                             file.write(playlist)
                     if self.verbose:
-                        print(*path)
+                        print(*self.path)
 
             if self.prune:
                 for orphan in orphans:
                     if self.change:
-                        os.remove(orphan, dir_fd=dir_fd)
+                        os.remove(orphan, dir_fd=child)
                     if self.verbose:
-                        print("\t", *path, orphan)
+                        print("\t", *self.path, orphan)
 
+            self.path.pop()
             return branches + leaves
 
 
@@ -104,7 +94,12 @@ def main() -> None:
     args = parser.parse_args()
     seed = Seed(not args.dry_run, not args.keep, args.dry_run or args.verbose)
     for root in args.root:
-        seed.grow(Directory(root))
+        if os.path.isdir(root):
+            seed.grow(root)
+        else:
+            sys.stderr.write(f"{root}: no such root directory\n")
+            parser.print_help(sys.stderr)
+            sys.exit(1)
 
 
 if __name__ == "__main__":
