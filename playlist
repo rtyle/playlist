@@ -6,15 +6,20 @@ import sys
 from contextlib import AbstractContextManager
 
 
-class FileDescriptorManager(AbstractContextManager):
-    def __init__(self, fd: int):
-        self.fd = fd
+class DirectoryContext(AbstractContextManager):
+    def __init__(self, path: list[str], name: str, parent: int):
+        self.path = path
+        self.name = name
+        self.parent = parent
 
     def __enter__(self) -> int:
-        return self.fd
+        self.path.append(self.name)
+        self.child = os.open(self.name, os.O_RDONLY, dir_fd=self.parent)
+        return self.child
 
     def __exit__(self, exc_type, exc_value, traceback):
-        os.close(self.fd)
+        os.close(self.child)
+        self.path.pop()
 
 
 class Seed:
@@ -22,11 +27,9 @@ class Seed:
         self.change = change
         self.prune = prune
         self.verbose = verbose
-        self.path = []
 
-    def grow(self, name: str, parent: int = None) -> list[str]:
-        with FileDescriptorManager(os.open(name, os.O_RDONLY, dir_fd=parent)) as child:
-            self.path.append(name)
+    def grow(self, path: list[str], name: str, parent: int = None) -> list[str]:
+        with DirectoryContext(path, name, parent) as child:
 
             branches = []
             leaves = []
@@ -34,7 +37,7 @@ class Seed:
             for entry in sorted(os.scandir(child), key=lambda e: e.name):
                 name = entry.name
                 if entry.is_dir():
-                    branches.extend(f"{name}/{item}" for item in self.grow(name, child))
+                    branches.extend(f"{name}/{item}" for item in self.grow(path, name, child))
                 elif entry.is_file():
                     lower = name.lower()
                     if lower.endswith((".mp3", ".flac", ".aac", ".wav", ".wma")):
@@ -43,7 +46,7 @@ class Seed:
                         orphans.add(name)
 
             if branches:
-                name = ".".join([*self.path, "m3u8"])
+                name = ".".join([*path, "m3u8"])
                 if name in orphans:
                     orphans.remove(name)
 
@@ -70,16 +73,15 @@ class Seed:
                         ) as file:
                             file.write(playlist)
                     if self.verbose:
-                        print(*self.path)
+                        print(*path)
 
             if self.prune:
                 for orphan in orphans:
                     if self.change:
                         os.remove(orphan, dir_fd=child)
                     if self.verbose:
-                        print("\t", *self.path, orphan)
+                        print("\t", *path, orphan)
 
-            self.path.pop()
             return branches + leaves
 
 
@@ -95,7 +97,7 @@ def main() -> None:
     seed = Seed(not args.dry_run, not args.keep, args.dry_run or args.verbose)
     for root in args.root:
         if os.path.isdir(root):
-            seed.grow(root)
+            seed.grow([], root)
         else:
             sys.stderr.write(f"{root}: no such root directory\n")
             parser.print_help(sys.stderr)
