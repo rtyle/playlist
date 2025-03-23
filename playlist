@@ -77,6 +77,8 @@ class Seed:
                         sys.stderr.write(f"{e}: read from {dc.os_path()}\n")
 
                     if not same:
+                        if self.verbose:
+                            print(*path)
                         if self.change:
                             try:
                                 with os.fdopen(
@@ -91,8 +93,6 @@ class Seed:
                                     file.write(playlist)
                             except PermissionError as e:
                                 sys.stderr.write(f"{e}: write from {dc.os_path()}\n")
-                        if self.verbose:
-                            print(*path)
 
                 if self.prune:
                     for orphan in orphans:
