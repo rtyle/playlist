@@ -37,8 +37,8 @@ class Seed:
 
     def grow(self, path: list[str], name: str, parent: int = None) -> list[str]:
         try:
-            child_context = DirectoryContext(path, name, parent)
-            with child_context as child:
+            dc = DirectoryContext(path, name, parent)
+            with dc as child:
 
                 branches = []
                 leaves = []
@@ -74,7 +74,7 @@ class Seed:
                     except FileNotFoundError:
                         pass
                     except PermissionError as e:
-                        sys.stderr.write(f"{e}: read from {child_context.os_path()}\n")
+                        sys.stderr.write(f"{e}: read from {dc.os_path()}\n")
 
                     if not same:
                         if self.change:
@@ -90,9 +90,7 @@ class Seed:
                                 ) as file:
                                     file.write(playlist)
                             except PermissionError as e:
-                                sys.stderr.write(
-                                    f"{e}: write from {child_context.os_path()}\n"
-                                )
+                                sys.stderr.write(f"{e}: write from {dc.os_path()}\n")
                         if self.verbose:
                             print(*path)
 
@@ -104,9 +102,7 @@ class Seed:
                             try:
                                 os.remove(orphan, dir_fd=child)
                             except PermissionError as e:
-                                sys.stderr.write(
-                                    f"{e}: remove from {child_context.os_path()}\n"
-                                )
+                                sys.stderr.write(f"{e}: remove from {dc.os_path()}\n")
 
                 return branches + leaves
 
