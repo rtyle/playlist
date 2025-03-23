@@ -12,14 +12,21 @@ class DirectoryContext(AbstractContextManager):
         self.name = name
         self.parent = parent
 
+    def os_path(self):
+        return "." if not self.path else os.path.join(*self.path)
+
     def __enter__(self) -> int:
+        try:
+            self.child = os.open(self.name, os.O_RDONLY, dir_fd=self.parent)
+        except PermissionError as e:
+            sys.stderr.write(f"{e}: scan from {self.os_path()}\n")
+            raise
         self.path.append(self.name)
-        self.child = os.open(self.name, os.O_RDONLY, dir_fd=self.parent)
         return self.child
 
     def __exit__(self, exc_type, exc_value, traceback):
-        os.close(self.child)
         self.path.pop()
+        os.close(self.child)
 
 
 class Seed:
@@ -29,60 +36,82 @@ class Seed:
         self.verbose = verbose
 
     def grow(self, path: list[str], name: str, parent: int = None) -> list[str]:
-        with DirectoryContext(path, name, parent) as child:
+        try:
+            child_context = DirectoryContext(path, name, parent)
+            with child_context as child:
 
-            branches = []
-            leaves = []
-            orphans = set()
-            for entry in sorted(os.scandir(child), key=lambda e: e.name):
-                name = entry.name
-                if entry.is_dir():
-                    branches.extend(f"{name}/{item}" for item in self.grow(path, name, child))
-                elif entry.is_file():
-                    lower = name.lower()
-                    if lower.endswith((".mp3", ".flac", ".aac", ".wav", ".wma")):
-                        leaves.append(name)
-                    elif lower.endswith(".m3u8"):
-                        orphans.add(name)
+                branches = []
+                leaves = []
+                orphans = set()
+                for entry in sorted(os.scandir(child), key=lambda e: e.name):
+                    name = entry.name
+                    if entry.is_dir():
+                        branches.extend(
+                            f"{name}/{item}" for item in self.grow(path, name, child)
+                        )
+                    elif entry.is_file():
+                        lower = name.lower()
+                        if lower.endswith((".mp3", ".flac", ".aac", ".wav", ".wma")):
+                            leaves.append(name)
+                        elif lower.endswith(".m3u8"):
+                            orphans.add(name)
 
-            if branches:
-                name = ".".join([*path, "m3u8"])
-                if name in orphans:
-                    orphans.remove(name)
+                if branches:
+                    name = ".".join([*path, "m3u8"])
+                    if name in orphans:
+                        orphans.remove(name)
 
-                playlist = "\n".join((f"#EXTM3U", "\n".join(branches))) + "\n"
+                    playlist = "\n".join((f"#EXTM3U", "\n".join(branches))) + "\n"
 
-                same = False
-                try:
-                    with os.fdopen(
-                        os.open(name, os.O_RDONLY, dir_fd=child), "r"
-                    ) as file:
-                        same = file.read() == playlist
-                except OSError:  # FileNotFoundError
-                    pass
-
-                if not same:
-                    if self.change:
+                    same = False
+                    try:
                         with os.fdopen(
-                            os.open(
-                                name,
-                                os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-                                dir_fd=child,
-                            ),
-                            "w",
+                            os.open(name, os.O_RDONLY, dir_fd=child),
+                            "r",
+                            encoding="utf-8",
                         ) as file:
-                            file.write(playlist)
-                    if self.verbose:
-                        print(*path)
+                            same = file.read() == playlist
+                    except FileNotFoundError:
+                        pass
+                    except PermissionError as e:
+                        sys.stderr.write(f"{e}: read from {child_context.os_path()}\n")
 
-            if self.prune:
-                for orphan in orphans:
-                    if self.change:
-                        os.remove(orphan, dir_fd=child)
-                    if self.verbose:
-                        print("\t", *path, orphan)
+                    if not same:
+                        if self.change:
+                            try:
+                                with os.fdopen(
+                                    os.open(
+                                        name,
+                                        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+                                        dir_fd=child,
+                                    ),
+                                    "w",
+                                    encoding="utf-8",
+                                ) as file:
+                                    file.write(playlist)
+                            except PermissionError as e:
+                                sys.stderr.write(
+                                    f"{e}: write from {child_context.os_path()}\n"
+                                )
+                        if self.verbose:
+                            print(*path)
 
-            return branches + leaves
+                if self.prune:
+                    for orphan in orphans:
+                        if self.verbose:
+                            print("\t", *path, orphan)
+                        if self.change:
+                            try:
+                                os.remove(orphan, dir_fd=child)
+                            except PermissionError as e:
+                                sys.stderr.write(
+                                    f"{e}: remove from {child_context.os_path()}\n"
+                                )
+
+                return branches + leaves
+
+        except PermissionError:
+            return []
 
 
 def main() -> None:
